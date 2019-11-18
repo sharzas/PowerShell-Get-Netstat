@@ -3,21 +3,62 @@ Function Get-Netstat {
     # Get a parsed and objectified version of Netstat -aon, with
     # extended Process information (if requested)
     #
+    # -NetstatObject : Output from netstat to be parsed.
+    # -ProcessObject : Output from Get-Process to be used for process resolution.
+    #
+    #                  NOTE: Select below properties to make it work if you get processes from a remote system!
+    #
+    #                  $ProcessProperties = @("ProcessName", "Id", @{N="FileName"; E={$_.MainModule.FileName}}, @{N="Description"; E={$_.MainModule.Description}})
+    #                  $Processes = Get-Process|Select-Object $ProcessProperties
+    #
+    #
     # -ResolveProcesses : Get extended processinformation, including executable path (takes longer to complete)
     #
+    # IMPORTANT: There is no validation between NetstatObject and ProcessObject. It is up to YOU
+    #            to ensure they are from the same computer, at roughly the same time!
     #
 
     [CmdLetBinding()]
     Param (
-        [switch]$Debug = $false,
+        [switch]$DoDebug = $false,
         [switch]$ListMatches = $false,
-        [switch]$ResolveProcesses = $false
+        [switch]$ResolveProcesses = $false,
+        [array]$NetstatObject,
+        [array]$ProcessObject
     )
 
-    $Netstat=Netstat -aon
+    if ($PSBoundParameters.ContainsKey("NetstatObject")) {
+        #
+        # NetstatObject supplied - use this instead of calling Netstat on local computer.
+        #
+        $Netstat = $NetstatObject
+    } else {
+        #
+        # NetstatObject NOT supplied - get output from Netstat on local computer.
+        #
+        $Netstat=Netstat -aon
+    }
 
     if ($ResolveProcesses) {
-        $Processes = Get-Process
+        #
+        # Resolve processes requested
+        #
+        if ($PSBoundParameters.ContainsKey("ProcessObject")) {
+            #
+            # Process object supplied - use that for process resolution
+            #
+            $Processes = $ProcessObject
+        } else {
+            #
+            # Set Properties to grab.
+            #
+            $ProcessProperties = @("ProcessName", "Id", @{N="FileName"; E={$_.MainModule.FileName}}, @{N="Description"; E={$_.MainModule.Description}})
+
+            #
+            # Grab processes.
+            #
+            $Processes = Get-Process|Select-Object $ProcessProperties
+        }
     }
 
     $Result = ForEach ($line in $Netstat) {
@@ -28,7 +69,7 @@ Function Get-Netstat {
             $line -match "^\s+(?<protocol>[A-Za-z]+)\s+\[(?<localip>.+)\]:(?<localport>\d{1,5})\s+\[(?<remoteip>.+)\]:(?<remoteport>\d{1,5})\s+(?<state>[A-Za-z_\-]+)\s+(?<pid>\d+)$" -or
             $line -match "^\s+(?<protocol>[A-Za-z]+)\s+\[(?<localip>.+)\]:(?<localport>\d{1,5})\s+\*:\*\s+(?<pid>\d+)$") {
 
-            if (!$Debug) {
+            if (!$DoDebug) {
 
                 $m = [PSCustomObject]@{
                     IPVersion = ""
@@ -58,8 +99,8 @@ Function Get-Netstat {
 
                         if ($Proc.Count -gt 0) {
                             $m|Add-Member -Name "ProcessName" -MemberType NoteProperty -Value $Proc[0].ProcessName -Force
-                            $m|Add-Member -Name "ProcessDescription" -MemberType NoteProperty -Value $Proc[0].MainModule.Description -Force
-                            $m|Add-Member -Name "ProcessFileName" -MemberType NoteProperty -Value $Proc[0].MainModule.FileName -Force
+                            $m|Add-Member -Name "ProcessDescription" -MemberType NoteProperty -Value $Proc[0].Description -Force
+                            $m|Add-Member -Name "ProcessFileName" -MemberType NoteProperty -Value $Proc[0].FileName -Force
                         }
                     }
 
@@ -75,7 +116,7 @@ Function Get-Netstat {
         $Match = $true
         }
 
-        if (!$Match -and $Debug) {
+        if (!$Match -and $DoDebug) {
             Write-Host "NO MATCH: $line"
         }       
     }
